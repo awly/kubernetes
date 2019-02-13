@@ -41,8 +41,11 @@ var tlsCache = &tlsTransportCache{transports: make(map[tlsCacheKey]*http.Transpo
 type tlsCacheKey struct {
 	insecure   bool
 	caData     string
+	caFile     string
 	certData   string
+	certFile   string
 	keyData    string
+	keyFile    string
 	getCert    string
 	serverName string
 	dial       string
@@ -53,14 +56,11 @@ func (t tlsCacheKey) String() string {
 	if len(t.keyData) > 0 {
 		keyText = "<redacted>"
 	}
-	return fmt.Sprintf("insecure:%v, caData:%#v, certData:%#v, keyData:%s, getCert: %s, serverName:%s, dial:%s", t.insecure, t.caData, t.certData, keyText, t.getCert, t.serverName, t.dial)
+	return fmt.Sprintf("insecure:%v, caData:%#v, caFile:%s, certData:%#v, certFile:%s, keyData:%s, keyFile:%s, getCert: %s, serverName:%s, dial:%s", t.insecure, t.caData, t.caFile, t.certData, t.certFile, keyText, t.keyFile, t.getCert, t.serverName, t.dial)
 }
 
 func (c *tlsTransportCache) get(config *Config) (http.RoundTripper, error) {
-	key, err := tlsConfigKey(config)
-	if err != nil {
-		return nil, err
-	}
+	key := tlsConfigKey(config)
 
 	// Ensure we only create a single transport for the given TLS options
 	c.mu.Lock()
@@ -100,18 +100,17 @@ func (c *tlsTransportCache) get(config *Config) (http.RoundTripper, error) {
 }
 
 // tlsConfigKey returns a unique key for tls.Config objects returned from TLSConfigFor
-func tlsConfigKey(c *Config) (tlsCacheKey, error) {
-	// Make sure ca/key/cert content is loaded
-	if err := loadTLSFiles(c); err != nil {
-		return tlsCacheKey{}, err
-	}
+func tlsConfigKey(c *Config) tlsCacheKey {
 	return tlsCacheKey{
 		insecure:   c.TLS.Insecure,
 		caData:     string(c.TLS.CAData),
+		caFile:     c.TLS.CAFile,
 		certData:   string(c.TLS.CertData),
+		certFile:   c.TLS.CertFile,
 		keyData:    string(c.TLS.KeyData),
+		keyFile:    c.TLS.KeyFile,
 		getCert:    fmt.Sprintf("%p", c.TLS.GetCert),
 		serverName: c.TLS.ServerName,
 		dial:       fmt.Sprintf("%p", c.Dial),
-	}, nil
+	}
 }

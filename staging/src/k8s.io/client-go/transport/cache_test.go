@@ -36,16 +36,8 @@ func TestTLSConfigKey(t *testing.T) {
 	}
 	for nameA, valueA := range identicalConfigurations {
 		for nameB, valueB := range identicalConfigurations {
-			keyA, err := tlsConfigKey(valueA)
-			if err != nil {
-				t.Errorf("Unexpected error for %q: %v", nameA, err)
-				continue
-			}
-			keyB, err := tlsConfigKey(valueB)
-			if err != nil {
-				t.Errorf("Unexpected error for %q: %v", nameB, err)
-				continue
-			}
+			keyA := tlsConfigKey(valueA)
+			keyB := tlsConfigKey(valueB)
 			if keyA != keyB {
 				t.Errorf("Expected identical cache keys for %q and %q, got:\n\t%s\n\t%s", nameA, nameB, keyA, keyB)
 				continue
@@ -129,16 +121,8 @@ func TestTLSConfigKey(t *testing.T) {
 	}
 	for nameA, valueA := range uniqueConfigurations {
 		for nameB, valueB := range uniqueConfigurations {
-			keyA, err := tlsConfigKey(valueA)
-			if err != nil {
-				t.Errorf("Unexpected error for %q: %v", nameA, err)
-				continue
-			}
-			keyB, err := tlsConfigKey(valueB)
-			if err != nil {
-				t.Errorf("Unexpected error for %q: %v", nameB, err)
-				continue
-			}
+			keyA := tlsConfigKey(valueA)
+			keyB := tlsConfigKey(valueB)
 
 			// Make sure we get the same key on the same config
 			if nameA == nameB {

@@ -23,7 +23,13 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"sync"
+	"time"
+
+	"k8s.io/klog"
 )
+
+const onDiskKeyReloadThreshold = time.Hour
 
 // New returns an http.RoundTripper that will provide the authentication
 // or transport level security defined by the provided Config.
@@ -59,7 +65,7 @@ func TLSConfigFor(c *Config) (*tls.Config, error) {
 	if c.HasCA() && c.TLS.Insecure {
 		return nil, fmt.Errorf("specifying a root certificates file with the insecure flag is not allowed")
 	}
-	if err := loadTLSFiles(c); err != nil {
+	if err := loadTLSCAFile(c); err != nil {
 		return nil, err
 	}
 
@@ -77,14 +83,23 @@ func TLSConfigFor(c *Config) (*tls.Config, error) {
 	}
 
 	var staticCert *tls.Certificate
-	if c.HasCertAuth() {
-		// If key/cert were provided, verify them before setting up
+	if len(c.TLS.CertData) > 0 && len(c.TLS.KeyData) > 0 {
+		// If key/cert were provided raw, parse them before setting up
 		// tlsConfig.GetClientCertificate.
 		cert, err := tls.X509KeyPair(c.TLS.CertData, c.TLS.KeyData)
 		if err != nil {
 			return nil, err
 		}
 		staticCert = &cert
+	}
+	if len(c.TLS.CertFile) > 0 && len(c.TLS.KeyFile) > 0 {
+		// On-disk key and certificate could be rotated by an external process.
+		// Reload them periodically.
+		rc, err := newReloadingCert(c.TLS.CertFile, c.TLS.KeyFile, onDiskKeyReloadThreshold)
+		if err != nil {
+			return nil, err
+		}
+		c.TLS.GetCert = rc.getCert
 	}
 
 	if c.HasCertAuth() || c.HasCertCallback() {
@@ -115,42 +130,21 @@ func TLSConfigFor(c *Config) (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
-// loadTLSFiles copies the data from the CertFile, KeyFile, and CAFile fields into the CertData,
-// KeyData, and CAFile fields, or returns an error. If no error is returned, all three fields are
-// either populated or were empty to start.
-func loadTLSFiles(c *Config) error {
-	var err error
-	c.TLS.CAData, err = dataFromSliceOrFile(c.TLS.CAData, c.TLS.CAFile)
+// loadTLSCAFile copies the data from the CAFile field into the CAFile field,
+// or returns an error.
+func loadTLSCAFile(c *Config) error {
+	if len(c.TLS.CAData) > 0 {
+		return nil
+	}
+	if len(c.TLS.CAFile) == 0 {
+		return nil
+	}
+	data, err := ioutil.ReadFile(c.TLS.CAFile)
 	if err != nil {
 		return err
 	}
-
-	c.TLS.CertData, err = dataFromSliceOrFile(c.TLS.CertData, c.TLS.CertFile)
-	if err != nil {
-		return err
-	}
-
-	c.TLS.KeyData, err = dataFromSliceOrFile(c.TLS.KeyData, c.TLS.KeyFile)
-	if err != nil {
-		return err
-	}
+	c.TLS.CAData = data
 	return nil
-}
-
-// dataFromSliceOrFile returns data from the slice (if non-empty), or from the file,
-// or an error if an error occurred reading the file
-func dataFromSliceOrFile(data []byte, file string) ([]byte, error) {
-	if len(data) > 0 {
-		return data, nil
-	}
-	if len(file) > 0 {
-		fileData, err := ioutil.ReadFile(file)
-		if err != nil {
-			return []byte{}, err
-		}
-		return fileData, nil
-	}
-	return nil, nil
 }
 
 // rootCertPool returns nil if caData is empty.  When passed along, this will mean "use system CAs".
@@ -224,4 +218,68 @@ func (b *contextCanceller) RoundTrip(req *http.Request) (*http.Response, error) 
 	default:
 		return b.rt.RoundTrip(req)
 	}
+}
+
+// reloadingCert provides a tls.GetCertificate callback for on-disk key/cert
+// pair. It keeps a cached certificate and attempts a reload after the
+// reloadThreshold.
+//
+// If reload fails, last read certificate gets returned.
+//
+// reloadingCert does not verify loaded certificate validity or expiration.
+//
+// reloadingCert is thread safe.
+type reloadingCert struct {
+	keyPath         string
+	certPath        string
+	reloadThreshold time.Duration
+
+	mu       *sync.RWMutex
+	current  tls.Certificate
+	lastLoad time.Time
+}
+
+func newReloadingCert(certPath, keyPath string, reloadThreshold time.Duration) (*reloadingCert, error) {
+	if reloadThreshold <= 0 {
+		return nil, fmt.Errorf("reloadThreshold must be positive, got %v", reloadThreshold)
+	}
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed loading key/certificate from disk: %v", err)
+	}
+
+	return &reloadingCert{
+		keyPath:         keyPath,
+		certPath:        certPath,
+		reloadThreshold: reloadThreshold,
+		mu:              new(sync.RWMutex),
+		current:         cert,
+		lastLoad:        time.Now(),
+	}, nil
+}
+
+func (c *reloadingCert) getCert() (*tls.Certificate, error) {
+	c.mu.RLock()
+	lastLoad := c.lastLoad
+	if time.Since(lastLoad) < c.reloadThreshold {
+		return &c.current, nil
+	}
+	c.mu.RUnlock()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if lastLoad != c.lastLoad {
+		// Another goroutine already reloaded key/cert. Avoid unnecessary disk
+		// reads.
+		return &c.current, nil
+	}
+
+	cert, err := tls.LoadX509KeyPair(c.certPath, c.keyPath)
+	if err != nil {
+		klog.Errorf("failed reloading key/certificate from disk, re-using last-loaded values; error: %v", err)
+		return &c.current, nil
+	}
+	c.current = cert
+	c.lastLoad = time.Now()
+	return &cert, nil
 }
