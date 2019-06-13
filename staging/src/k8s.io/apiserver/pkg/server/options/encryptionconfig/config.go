@@ -43,6 +43,7 @@ const (
 	aesGCMTransformerPrefixV1    = "k8s:enc:aesgcm:v1:"
 	secretboxTransformerPrefixV1 = "k8s:enc:secretbox:v1:"
 	kmsTransformerPrefixV1       = "k8s:enc:kms:v1:"
+	sm4TransformerPrefixV1       = "k8s:enc:sm4:v1:"
 	kmsPluginConnectionTimeout   = 3 * time.Second
 )
 
