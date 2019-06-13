@@ -43,6 +43,7 @@ require (
 	github.com/soheilhy/cmux v0.1.3 // indirect
 	github.com/spf13/pflag v1.0.1
 	github.com/stretchr/testify v1.2.2
+	github.com/tjfoc/gmsm v1.0.1
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20170815181823-89b8d40f7ca8 // indirect
 	github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18 // indirect
 	go.uber.org/atomic v0.0.0-20181018215023-8dc6146f7569 // indirect
