@@ -88,3 +88,10 @@ type KMSConfiguration struct {
 	// +optional
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
 }
+
+// SM4Configuration contains the API configuration for the SM4 transformer.
+type SM4Configuration struct {
+	// Keys are the key to be used for creating the SM4 transformer.
+	// Each key has to be 16 bytes long.
+	Keys []Key `json:"keys"`
+}
