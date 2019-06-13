@@ -26,6 +26,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/tjfoc/gmsm/sm4"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -36,6 +37,7 @@ import (
 	"k8s.io/apiserver/pkg/storage/value/encrypt/envelope"
 	"k8s.io/apiserver/pkg/storage/value/encrypt/identity"
 	"k8s.io/apiserver/pkg/storage/value/encrypt/secretbox"
+	sm4transformer "k8s.io/apiserver/pkg/storage/value/encrypt/sm4"
 )
 
 const (
@@ -191,6 +193,13 @@ func GetPrefixTransformers(config *apiserverconfig.ResourceConfiguration) ([]val
 			transformer, err = getEnvelopePrefixTransformer(provider.KMS, envelopeService, kmsTransformerPrefixV1)
 			found = true
 		}
+		if provider.SM4 != nil {
+			transformer, err = GetSM4PrefixTransformer(provider.SM4, sm4TransformerPrefixV1)
+			if err != nil {
+				return nil, err
+			}
+			found = true
+		}
 
 		if err != nil {
 			return result, err
@@ -305,6 +314,51 @@ func GetSecretboxPrefixTransformer(config *apiserverconfig.SecretboxConfiguratio
 		Prefix:      []byte(secretboxTransformerPrefixV1),
 	}
 	return result, nil
+}
+
+// GetSM4PrefixTransformer returns an SM4 transformer based on the provided
+// prefix and block transformer.
+func GetSM4PrefixTransformer(config *apiserverconfig.SM4Configuration, prefix string) (value.PrefixTransformer, error) {
+	var result value.PrefixTransformer
+
+	if len(config.Keys) == 0 {
+		return result, fmt.Errorf("sm4 provider has no valid keys")
+	}
+	for _, key := range config.Keys {
+		if key.Name == "" {
+			return result, fmt.Errorf("sm4 key with empty name provided")
+		}
+		if key.Secret == "" {
+			return result, fmt.Errorf("sm4 key %q has no provided secret", key.Name)
+		}
+	}
+
+	var keyTransformers []value.PrefixTransformer
+	for _, keyData := range config.Keys {
+		key, err := base64.StdEncoding.DecodeString(keyData.Secret)
+		if err != nil {
+			return result, fmt.Errorf("could not obtain secret for named key %q: %s", keyData.Name, err)
+		}
+		block, err := sm4.NewCipher(key)
+		if err != nil {
+			return result, fmt.Errorf("error while creating cipher for named key %q: %s", keyData.Name, err)
+		}
+
+		// Create a new PrefixTransformer for this key
+		keyTransformers = append(keyTransformers, value.PrefixTransformer{
+			Transformer: sm4transformer.New(block),
+			Prefix:      []byte(keyData.Name + ":"),
+		})
+	}
+
+	// Create a prefixTransformer which can choose between these keys
+	keyTransformer := value.NewPrefixTransformers(fmt.Errorf("no matching key was found for the provided SM4 transformer"), keyTransformers...)
+
+	// Create a PrefixTransformer which shall later be put in a list with other providers
+	return value.PrefixTransformer{
+		Transformer: keyTransformer,
+		Prefix:      []byte(prefix),
+	}, nil
 }
 
 // getEnvelopePrefixTransformer returns a prefix transformer from the provided config.

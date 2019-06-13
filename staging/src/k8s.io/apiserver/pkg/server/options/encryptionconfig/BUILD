@@ -22,6 +22,8 @@ go_library(
         "//staging/src/k8s.io/apiserver/pkg/storage/value/encrypt/envelope:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/storage/value/encrypt/identity:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/storage/value/encrypt/secretbox:go_default_library",
+        "//staging/src/k8s.io/apiserver/pkg/storage/value/encrypt/sm4:go_default_library",
+        "//vendor/github.com/tjfoc/gmsm/sm4:go_default_library",
     ],
 )
 
