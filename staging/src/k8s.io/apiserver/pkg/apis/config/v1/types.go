@@ -48,6 +48,8 @@ type ProviderConfiguration struct {
 	Identity *IdentityConfiguration `json:"identity,omitempty"`
 	// kms contains the name, cache size and path to configuration file for a KMS based envelope transformer.
 	KMS *KMSConfiguration `json:"kms,omitempty"`
+	// SM4 contains encryption key for SM4 transformer.
+	SM4 *SM4Configuration `json:"sm4,omitempty"`
 }
 
 // AESConfiguration contains the API configuration for an AES transformer.

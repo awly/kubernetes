@@ -50,6 +50,8 @@ type ProviderConfiguration struct {
 	Identity *IdentityConfiguration
 	// kms contains the name, cache size and path to configuration file for a KMS based envelope transformer.
 	KMS *KMSConfiguration
+	// SM4 contains encryption key for SM4 transformer.
+	SM4 *SM4Configuration
 }
 
 // AESConfiguration contains the API configuration for an AES transformer.
