@@ -46,7 +46,10 @@ const (
 	secretboxTransformerPrefixV1 = "k8s:enc:secretbox:v1:"
 	kmsTransformerPrefixV1       = "k8s:enc:kms:v1:"
 	sm4TransformerPrefixV1       = "k8s:enc:sm4:v1:"
-	kmsPluginConnectionTimeout   = 3 * time.Second
+
+	kmsPluginConnectionTimeout = 3 * time.Second
+
+	aesDEKSize = 32
 )
 
 // GetTransformerOverrides returns the transformer overrides by reading and parsing the encryption provider configuration file
@@ -189,8 +192,15 @@ func GetPrefixTransformers(config *apiserverconfig.ResourceConfiguration) ([]val
 			if err != nil {
 				return nil, fmt.Errorf("could not configure KMS plugin %q, error: %v", provider.KMS.Name, err)
 			}
+			newCBCTransformer := func(key []byte) (value.Transformer, error) {
+				c, err := aes.NewCipher(key)
+				if err != nil {
+					return nil, err
+				}
+				return aestransformer.NewCBCTransformer(c), nil
+			}
 
-			transformer, err = getEnvelopePrefixTransformer(provider.KMS, envelopeService, kmsTransformerPrefixV1)
+			transformer, err = getEnvelopePrefixTransformer(envelopeService, int(provider.KMS.CacheSize), aesDEKSize, newCBCTransformer, kmsTransformerPrefixV1+provider.KMS.Name+":")
 			found = true
 		}
 		if provider.SM4 != nil {
@@ -363,20 +373,13 @@ func GetSM4PrefixTransformer(config *apiserverconfig.SM4Configuration, prefix st
 
 // getEnvelopePrefixTransformer returns a prefix transformer from the provided config.
 // envelopeService is used as the root of trust.
-func getEnvelopePrefixTransformer(config *apiserverconfig.KMSConfiguration, envelopeService envelope.Service, prefix string) (value.PrefixTransformer, error) {
-	newCBCTransformer := func(key []byte) (value.Transformer, error) {
-		c, err := aes.NewCipher(key)
-		if err != nil {
-			return nil, err
-		}
-		return aestransformer.NewCBCTransformer(c), nil
-	}
-	envelopeTransformer, err := envelope.NewEnvelopeTransformer(envelopeService, int(config.CacheSize), 32, newCBCTransformer)
+func getEnvelopePrefixTransformer(envelopeService envelope.Service, cacheSize, keySize int, newTransformer func(key []byte) (value.Transformer, error), prefix string) (value.PrefixTransformer, error) {
+	envelopeTransformer, err := envelope.NewEnvelopeTransformer(envelopeService, cacheSize, keySize, newTransformer)
 	if err != nil {
 		return value.PrefixTransformer{}, err
 	}
 	return value.PrefixTransformer{
 		Transformer: envelopeTransformer,
-		Prefix:      []byte(prefix + config.Name + ":"),
+		Prefix:      []byte(prefix),
 	}, nil
 }
