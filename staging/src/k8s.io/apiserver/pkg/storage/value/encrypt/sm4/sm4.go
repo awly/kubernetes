@@ -29,15 +29,21 @@ import (
 	"k8s.io/apiserver/pkg/storage/value"
 )
 
+const KeySize = sm4.BlockSize
+
 // CBC implements encryption at rest of the provided values given a cipher.Block algorithm.
 type CBC struct {
 	block cipher.Block
 }
 
-// New takes the given block cipher and performs encryption and decryption on
-// the given data.
-func New(block cipher.Block) *CBC {
-	return &CBC{block: block}
+// New takes the given SM4 key and performs encryption and decryption on the
+// given data.
+func New(key []byte) (value.Transformer, error) {
+	block, err := sm4.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	return &CBC{block: block}, nil
 }
 
 func (t *CBC) TransformFromStorage(data []byte, context value.Context) ([]byte, bool, error) {
