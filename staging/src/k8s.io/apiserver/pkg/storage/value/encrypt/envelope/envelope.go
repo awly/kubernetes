@@ -18,8 +18,6 @@ limitations under the License.
 package envelope
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -53,14 +51,15 @@ type envelopeTransformer struct {
 	transformers *lru.Cache
 
 	// baseTransformerFunc creates a new transformer for encrypting the data with the DEK.
-	baseTransformerFunc func(cipher.Block) value.Transformer
+	baseTransformerFunc func([]byte) (value.Transformer, error)
+	dekSize             int
 }
 
 // NewEnvelopeTransformer returns a transformer which implements a KEK-DEK based envelope encryption scheme.
 // It uses envelopeService to encrypt and decrypt DEKs. Respective DEKs (in encrypted form) are prepended to
 // the data items they encrypt. A cache (of size cacheSize) is maintained to store the most recently
 // used decrypted DEKs in memory.
-func NewEnvelopeTransformer(envelopeService Service, cacheSize int, baseTransformerFunc func(cipher.Block) value.Transformer) (value.Transformer, error) {
+func NewEnvelopeTransformer(envelopeService Service, cacheSize, dekSize int, baseTransformerFunc func([]byte) (value.Transformer, error)) (value.Transformer, error) {
 	if cacheSize == 0 {
 		cacheSize = defaultCacheSize
 	}
@@ -72,6 +71,7 @@ func NewEnvelopeTransformer(envelopeService Service, cacheSize int, baseTransfor
 		envelopeService:     envelopeService,
 		transformers:        cache,
 		baseTransformerFunc: baseTransformerFunc,
+		dekSize:             dekSize,
 	}, nil
 }
 
@@ -106,7 +106,7 @@ func (t *envelopeTransformer) TransformFromStorage(data []byte, context value.Co
 
 // TransformToStorage encrypts data to be written to disk using envelope encryption.
 func (t *envelopeTransformer) TransformToStorage(data []byte, context value.Context) ([]byte, error) {
-	newKey, err := generateKey(32)
+	newKey, err := generateKey(t.dekSize)
 	if err != nil {
 		return nil, err
 	}
@@ -139,11 +139,10 @@ var _ value.Transformer = &envelopeTransformer{}
 
 // addTransformer inserts a new transformer to the Envelope cache of DEKs for future reads.
 func (t *envelopeTransformer) addTransformer(encKey []byte, key []byte) (value.Transformer, error) {
-	block, err := aes.NewCipher(key)
+	transformer, err := t.baseTransformerFunc(key)
 	if err != nil {
 		return nil, err
 	}
-	transformer := t.baseTransformerFunc(block)
 	// Use base64 of encKey as the key into the cache because hashicorp/golang-lru
 	// cannot hash []uint8.
 	t.transformers.Add(base64.StdEncoding.EncodeToString(encKey), transformer)

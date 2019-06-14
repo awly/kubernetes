@@ -364,7 +364,14 @@ func GetSM4PrefixTransformer(config *apiserverconfig.SM4Configuration, prefix st
 // getEnvelopePrefixTransformer returns a prefix transformer from the provided config.
 // envelopeService is used as the root of trust.
 func getEnvelopePrefixTransformer(config *apiserverconfig.KMSConfiguration, envelopeService envelope.Service, prefix string) (value.PrefixTransformer, error) {
-	envelopeTransformer, err := envelope.NewEnvelopeTransformer(envelopeService, int(config.CacheSize), aestransformer.NewCBCTransformer)
+	newCBCTransformer := func(key []byte) (value.Transformer, error) {
+		c, err := aes.NewCipher(key)
+		if err != nil {
+			return nil, err
+		}
+		return aestransformer.NewCBCTransformer(c), nil
+	}
+	envelopeTransformer, err := envelope.NewEnvelopeTransformer(envelopeService, int(config.CacheSize), 32, newCBCTransformer)
 	if err != nil {
 		return value.PrefixTransformer{}, err
 	}
