@@ -91,6 +91,10 @@ type KMSConfiguration struct {
 	// Timeout for gRPC calls to kms-plugin (ex. 5s). The default is 3 seconds.
 	// +optional
 	Timeout *metav1.Duration
+	// DEKType is the key algorithm to use for DEKs. Supported values are "aes"
+	// and "sm4". When empty, defaults to "aes".
+	// +optional
+	DEKType string
 }
 
 // SM4Configuration contains the API configuration for the SM4 transformer.
