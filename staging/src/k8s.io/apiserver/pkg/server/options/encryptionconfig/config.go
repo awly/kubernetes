@@ -26,7 +26,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/tjfoc/gmsm/sm4"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -187,20 +186,31 @@ func GetPrefixTransformers(config *apiserverconfig.ResourceConfiguration) ([]val
 				timeout = provider.KMS.Timeout.Duration
 			}
 
+			var newDEKTransformer func([]byte) (value.Transformer, error)
+			var dekSize int
+			switch provider.KMS.DEKType {
+			case "sm4":
+				newDEKTransformer = sm4transformer.New
+				dekSize = sm4transformer.KeySize
+			case "aes", "":
+				newDEKTransformer = func(key []byte) (value.Transformer, error) {
+					c, err := aes.NewCipher(key)
+					if err != nil {
+						return nil, err
+					}
+					return aestransformer.NewCBCTransformer(c), nil
+				}
+				dekSize = aesDEKSize
+			default:
+				return nil, fmt.Errorf("dektype %q is not supported", provider.KMS.DEKType)
+			}
 			// Get gRPC client service with endpoint.
 			envelopeService, err := envelopeServiceFactory(provider.KMS.Endpoint, timeout)
 			if err != nil {
 				return nil, fmt.Errorf("could not configure KMS plugin %q, error: %v", provider.KMS.Name, err)
 			}
-			newCBCTransformer := func(key []byte) (value.Transformer, error) {
-				c, err := aes.NewCipher(key)
-				if err != nil {
-					return nil, err
-				}
-				return aestransformer.NewCBCTransformer(c), nil
-			}
 
-			transformer, err = getEnvelopePrefixTransformer(envelopeService, int(provider.KMS.CacheSize), aesDEKSize, newCBCTransformer, kmsTransformerPrefixV1+provider.KMS.Name+":")
+			transformer, err = getEnvelopePrefixTransformer(envelopeService, int(provider.KMS.CacheSize), dekSize, newDEKTransformer, kmsTransformerPrefixV1+provider.KMS.Name+":")
 			found = true
 		}
 		if provider.SM4 != nil {
@@ -349,14 +359,14 @@ func GetSM4PrefixTransformer(config *apiserverconfig.SM4Configuration, prefix st
 		if err != nil {
 			return result, fmt.Errorf("could not obtain secret for named key %q: %s", keyData.Name, err)
 		}
-		block, err := sm4.NewCipher(key)
+		trans, err := sm4transformer.New(key)
 		if err != nil {
-			return result, fmt.Errorf("error while creating cipher for named key %q: %s", keyData.Name, err)
+			return result, fmt.Errorf("error while creating transformer for named key %q: %s", keyData.Name, err)
 		}
 
 		// Create a new PrefixTransformer for this key
 		keyTransformers = append(keyTransformers, value.PrefixTransformer{
-			Transformer: sm4transformer.New(block),
+			Transformer: trans,
 			Prefix:      []byte(keyData.Name + ":"),
 		})
 	}
